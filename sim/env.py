@@ -371,6 +371,8 @@ class CCUSEnv(ParallelEnv):
 
         # Last outcome (for observations after step)
         self._last_outcome: Optional[PhysicalOutcome] = None
+        self._last_decisions: Optional[Dict[str, Any]] = None
+        self._last_step_trace: Optional[Dict[str, Any]] = None
 
         # Reward normalization
         self._reward_running_mean: Dict[str, float] = {a: 1.0 for a in self.possible_agents}
@@ -467,6 +469,8 @@ class CCUSEnv(ParallelEnv):
                 "reward_cumulative": 0.0,
             }
         self._last_outcome = None
+        self._last_decisions = None
+        self._last_step_trace = None
         # Track last posted prices and revenue for observations
         self._last_posted_prices: Dict[str, float] = {m: 0.0 for m in self._transport_modes}
         self._last_transport_revenue: Dict[str, float] = {m: 0.0 for m in self._transport_modes}
@@ -542,6 +546,7 @@ class CCUSEnv(ParallelEnv):
 
         # ------ 2. Parse agent actions into decision intents ------
         decisions = self._parse_decisions(actions)
+        self._last_decisions = decisions
 
         # ------ 3 & 4. Physical execution (includes nomination settlement) ------
         outcome = self.physical_layer.settle(
@@ -599,9 +604,15 @@ class CCUSEnv(ParallelEnv):
             "scarcity_ratios": dict(outcome.scarcity_ratios),
             "terminal_buffers": dict(outcome.terminal_buffer_levels),
             "economic_context": self.get_economic_context(),
+            "disruptions_detail": self._serialize_disruptions(events, pressure_triggers),
+            "decision_summary": self._summarize_decisions(decisions),
+            "outcome_summary": self._summarize_outcome(outcome),
+            "physical_state": self.physical_layer.get_state(),
+            "agent_rewards": dict(rewards),
         }
         if terminated:
             step_info["episode_stats"] = dict(self._episode_stats)
+        self._last_step_trace = dict(step_info)
 
         infos = {agent: step_info for agent in self.agents}
 
@@ -818,6 +829,150 @@ class CCUSEnv(ParallelEnv):
             result["emitter_bids"] = emitter_bids
             result["transport_params"] = transport_extra_params
         return result
+
+    def _serialize_disruptions(
+        self,
+        events: List[Any],
+        pressure_triggers: List[Tuple[int, float, float]],
+    ) -> List[Dict[str, Any]]:
+        serialized: List[Dict[str, Any]] = []
+        for evt in events:
+            serialized.append(
+                {
+                    "target_type": str(evt.target_type),
+                    "target_id": int(evt.target_id),
+                    "severity": float(evt.severity),
+                    "duration": float(evt.duration),
+                    "cause": str(getattr(evt, "cause", "unknown")),
+                    "timestep": int(getattr(evt, "timestep", self.timestep)),
+                }
+            )
+        for sid, severity, duration in pressure_triggers:
+            serialized.append(
+                {
+                    "target_type": "storage",
+                    "target_id": int(sid),
+                    "severity": float(severity),
+                    "duration": float(duration),
+                    "cause": "pressure_trigger",
+                    "timestep": int(self.timestep),
+                }
+            )
+        return serialized
+
+    def _summarize_decisions(self, decisions: Dict[str, Any]) -> Dict[str, Any]:
+        emitter_routes: Dict[int, List[Dict[str, float]]] = {}
+        for eid, nominations in decisions.get("emitter_nominations", {}).items():
+            route_rows: List[Dict[str, float]] = []
+            for transport_idx, sid, volume in nominations:
+                mode_name = (
+                    self._transport_modes[transport_idx]
+                    if 0 <= transport_idx < len(self._transport_modes)
+                    else str(transport_idx)
+                )
+                route_rows.append(
+                    {
+                        "transport_idx": int(transport_idx),
+                        "transport_mode": str(mode_name),
+                        "storage_id": int(sid),
+                        "volume": float(volume),
+                    }
+                )
+            emitter_routes[int(eid)] = route_rows
+
+        return {
+            "emitters": {
+                int(eid): {
+                    "capture_frac": float(
+                        decisions.get("emitter_capture_fracs", {}).get(eid, 0.0)
+                    ),
+                    "purification_effort": float(
+                        decisions.get("emitter_purification_efforts", {}).get(eid, 0.0)
+                    ),
+                    "routes": emitter_routes.get(int(eid), []),
+                }
+                for eid in sorted(self.physical_layer.emitters.keys())
+            },
+            "transport": {
+                str(mode_name): {
+                    "threshold": float(
+                        decisions.get("transport_thresholds", {}).get(mode_name, 0.0)
+                    ),
+                    "quality_threshold": float(
+                        decisions.get("transport_quality_thresholds", {}).get(mode_name, 0.0)
+                    ),
+                    "posted_price": float(
+                        decisions.get("transport_posted_prices", {}).get(mode_name, 0.0)
+                    ),
+                    "params": {
+                        str(k): float(v)
+                        for k, v in decisions.get("transport_params", {})
+                        .get(mode_name, {})
+                        .items()
+                    },
+                }
+                for mode_name in self._transport_modes
+            },
+            "storage": {
+                int(sid): {
+                    "injection_frac": float(
+                        decisions.get("storage_injection_fracs", {}).get(sid, 0.0)
+                    ),
+                    "quality_target": float(
+                        decisions.get("storage_quality_targets", {}).get(sid, 0.0)
+                    ),
+                }
+                for sid in sorted(self.physical_layer.storage_sites.keys())
+            },
+        }
+
+    def _summarize_outcome(self, outcome: PhysicalOutcome) -> Dict[str, Any]:
+        return {
+            "emitters": {
+                int(eid): {
+                    "captured": float(outcome.emitter_captured.get(eid, 0.0)),
+                    "vented": float(outcome.emitter_vented.get(eid, 0.0)),
+                    "sent": float(outcome.emitter_sent.get(eid, 0.0)),
+                    "buffer_frac": float(outcome.emitter_buffer_frac.get(eid, 0.0)),
+                    "purity": float(outcome.emitter_effective_purity.get(eid, 0.0)),
+                    "transport_cost": float(
+                        outcome.emitter_transport_cost.get(eid, 0.0)
+                    ),
+                }
+                for eid in sorted(self.physical_layer.emitters.keys())
+            },
+            "transport": {
+                str(mode_name): {
+                    "accepted": float(outcome.transport_accepted.get(mode_name, 0.0)),
+                    "delivered": float(outcome.transport_delivered.get(mode_name, 0.0)),
+                    "rejected": float(outcome.transport_rejected.get(mode_name, 0.0)),
+                    "utilization": float(
+                        outcome.transport_utilization.get(mode_name, 0.0)
+                    ),
+                    "revenue": float(outcome.transport_revenue.get(mode_name, 0.0)),
+                }
+                for mode_name in self._transport_modes
+            },
+            "storage": {
+                int(sid): {
+                    "injected": float(outcome.storage_injected.get(sid, 0.0)),
+                    "pressure_margin": float(
+                        outcome.storage_pressure_margin.get(sid, 0.0)
+                    ),
+                    "inlet_purity": float(
+                        outcome.storage_inlet_purity.get(sid, 0.0)
+                    ),
+                    "quality_penalty": float(
+                        outcome.storage_quality_penalty.get(sid, 0.0)
+                    ),
+                    "quality_violation": bool(
+                        outcome.storage_quality_violation.get(sid, False)
+                    ),
+                    "overflow": float(outcome.storage_overflow.get(sid, 0.0)),
+                }
+                for sid in sorted(self.physical_layer.storage_sites.keys())
+            },
+        }
 
     # ------------------------------------------------------------------
     # Reward computation
@@ -1305,6 +1460,9 @@ class CCUSEnv(ParallelEnv):
         stats["pricing_mode"] = self.pricing_mode
         stats["carbon_tax"] = self.get_economic_context()["carbon_tax"]
         return stats
+
+    def get_last_step_trace(self) -> Dict[str, Any]:
+        return dict(self._last_step_trace) if self._last_step_trace is not None else {}
 
     def state(self) -> Dict[str, Any]:
         return {

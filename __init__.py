@@ -62,6 +62,12 @@ from ccus_gym.rl.mappo import (
     train_mappo,
     write_tensorboard_history,
 )
+from ccus_gym.viz import (
+    animate_episode_trace,
+    rollout_episode_trace,
+    save_episode_animation,
+    save_episode_trace_json,
+)
 
 __version__ = "0.4.0"
 
@@ -111,4 +117,8 @@ __all__ = [
     "score_episode",
     "train_mappo",
     "write_tensorboard_history",
+    "animate_episode_trace",
+    "rollout_episode_trace",
+    "save_episode_animation",
+    "save_episode_trace_json",
 ]

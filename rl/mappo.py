@@ -16,6 +16,7 @@ import csv
 from dataclasses import dataclass
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -564,6 +565,7 @@ def save_checkpoint(
     policies: Dict[str, RoleMAPPOPolicy],
     metadata: Dict[str, Any] | None = None,
 ) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     payload: Dict[str, Any] = {
         "metadata": metadata or {},
         "roles": {},
@@ -601,6 +603,7 @@ def load_checkpoint(
 
 
 def save_history_jsonl(path: str, history: List[Dict[str, Any]]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for row in history:
             f.write(json.dumps(row, ensure_ascii=True) + "\n")
@@ -609,6 +612,7 @@ def save_history_jsonl(path: str, history: List[Dict[str, Any]]) -> None:
 def save_history_csv(path: str, history: List[Dict[str, Any]]) -> None:
     if not history:
         raise ValueError("History is empty; nothing to save.")
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
         "episode",
@@ -665,6 +669,7 @@ def save_history_csv(path: str, history: List[Dict[str, Any]]) -> None:
 def write_tensorboard_history(log_dir: str, history: List[Dict[str, Any]]) -> None:
     if not history:
         raise ValueError("History is empty; nothing to log.")
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
     try:
         from torch.utils.tensorboard import SummaryWriter
     except ImportError as exc:
@@ -711,6 +716,7 @@ def write_tensorboard_history(log_dir: str, history: List[Dict[str, Any]]) -> No
 def plot_training_history(path: str, history: List[Dict[str, Any]]) -> None:
     if not history:
         raise ValueError("History is empty; nothing to plot.")
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     episodes = [row["episode"] for row in history]
     total_stored = [row.get("total_stored", 0.0) for row in history]
