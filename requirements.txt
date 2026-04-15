@@ -1,0 +1,8 @@
+numpy
+gymnasium
+pettingzoo
+pyyaml
+scikit-learn
+torch
+matplotlib
+tensorboard
