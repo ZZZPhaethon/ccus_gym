@@ -15,6 +15,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--checkpoint", default="", help="Optional MAPPO checkpoint for policy replay.")
+    parser.add_argument("--rule-based", action="store_true", help="Use the economics-aware rule-based baseline.")
     parser.add_argument("--random-policy", action="store_true", help="Force random actions even if a checkpoint is given.")
     parser.add_argument("--steps", type=int, default=24, help="Maximum number of steps to animate.")
     parser.add_argument("--interval-ms", type=int, default=1200)
@@ -27,6 +28,7 @@ def main() -> None:
         sys.path.insert(0, package_parent)
 
     import ccus_gym
+    from ccus_gym.baselines.rule_based import EconomicRuleBasedController
     from ccus_gym.rl.mappo import load_checkpoint
     from ccus_gym.viz import rollout_episode_trace, save_episode_animation, save_episode_trace_json
 
@@ -39,8 +41,12 @@ def main() -> None:
     env = ccus_gym.CCUSEnv(config)
 
     policies = None
+    controller = None
     replay_title = f"CCUS Replay | {args.base} | {args.scenario} | severity={args.severity}"
-    if args.checkpoint and not args.random_policy:
+    if args.rule_based:
+        controller = EconomicRuleBasedController()
+        replay_title += " | rule-based"
+    elif args.checkpoint and not args.random_policy:
         policies, metadata = load_checkpoint(
             args.checkpoint,
             env,
@@ -54,6 +60,7 @@ def main() -> None:
     trace = rollout_episode_trace(
         env,
         policies=policies,
+        controller=controller,
         seed=args.seed,
         deterministic=True,
         max_steps=args.steps,

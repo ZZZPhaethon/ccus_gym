@@ -1,4 +1,6 @@
-# CCUS-Gym
+# CCUS-Gym: multi-agent reinforcement learning environment for CCUS
+
+![Teaser image](assets/project_overview.png)
 
 CCUS-Gym is a PettingZoo-based multi-agent reinforcement learning environment for
 coordinated CO2 capture, transport, and storage under operational disruptions,

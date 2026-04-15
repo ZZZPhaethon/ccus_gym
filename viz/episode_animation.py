@@ -16,8 +16,8 @@ from matplotlib.colors import Normalize
 from matplotlib.cm import get_cmap
 import numpy as np
 
+from ccus_gym.baselines.rule_based import EconomicRuleBasedController
 from ccus_gym.rl.mappo import RoleMAPPOPolicy
-from ccus_gym.rl.training import build_role_groups
 from ccus_gym.sim.env import CCUSEnv
 
 
@@ -49,6 +49,7 @@ def rollout_episode_trace(
     env: CCUSEnv,
     policies: Optional[Dict[str, RoleMAPPOPolicy]] = None,
     *,
+    controller: Optional[EconomicRuleBasedController] = None,
     seed: int = 42,
     deterministic: bool = True,
     max_steps: Optional[int] = None,
@@ -61,17 +62,20 @@ def rollout_episode_trace(
     while not done:
         state = env.global_state_vector()
         actions: Dict[str, np.ndarray] = {}
-        for agent in env.agents:
-            if policies is None:
-                actions[agent] = env.action_space(agent).sample()
-            else:
-                role = _role_from_agent(agent)
-                action, _, _ = policies[role].act(
-                    observations[agent],
-                    state,
-                    deterministic=deterministic,
-                )
-                actions[agent] = action
+        if controller is not None:
+            actions = controller.act_all(env, observations, state)
+        else:
+            for agent in env.agents:
+                if policies is None:
+                    actions[agent] = env.action_space(agent).sample()
+                else:
+                    role = _role_from_agent(agent)
+                    action, _, _ = policies[role].act(
+                        observations[agent],
+                        state,
+                        deterministic=deterministic,
+                    )
+                    actions[agent] = action
 
         next_obs, rewards, terminations, truncations, infos = env.step(actions)
         done = all(terminations.values()) or all(truncations.values())
