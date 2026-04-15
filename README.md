@@ -54,12 +54,12 @@ Each agent then learns how to operate within that fixed network.
 The environment keeps decision logic separate from physics:
 
 ```text
-Decision Layer (env.py)
+Decision Layer (sim/env.py)
     -> parses actions
     -> builds observations
     -> computes rewards
 
-Physical Layer (physical.py)
+Physical Layer (core/physical.py)
     -> settles nominations
     -> simulates pipeline / ship / rail movement
     -> applies storage pressure dynamics
@@ -69,7 +69,7 @@ Physical Layer (physical.py)
 The minimal training stack sits beside the environment:
 
 ```text
-mappo.py
+rl/mappo.py
     -> role-shared MAPPO trainer
     -> checkpoint save/load
     -> deterministic evaluation
@@ -78,22 +78,36 @@ mappo.py
 
 ## Repository Guide
 
-| File | Purpose |
-|------|---------|
-| `env.py` | Main PettingZoo environment `CCUSEnv` |
-| `physical.py` | Physical simulation layer and monthly settlement logic |
-| `network.py` | Network dataclasses and connectivity container |
-| `quality.py` | CO2 purity/composition defaults, blending, and storage acceptance checks |
-| `disruptions.py` | Stochastic disruption generator |
-| `configs.py` | Built-in network/scenario/economic defaults |
-| `case_loader.py` | YAML case loader |
-| `training.py` | Training metadata helpers and MAPPO defaults |
-| `mappo.py` | Minimal MAPPO implementation and experiment utilities |
-| `train_mappo.py` | CLI for training |
-| `eval_mappo.py` | CLI for checkpoint evaluation |
-| `batch_mappo.py` | CLI for multi-seed experiments |
-| `storage_proxy.py` | Optional ML proxy for storage pressure prediction |
-| `tools.py` | Read-only helper toolkit for querying the physical layer |
+The codebase is now grouped by function:
+
+```text
+ccus_gym/
+├── core/
+│   ├── network.py
+│   ├── physical.py
+│   ├── quality.py
+│   ├── storage_proxy.py
+│   └── tools.py
+├── sim/
+│   ├── env.py
+│   ├── disruptions.py
+│   ├── configs.py
+│   └── case_loader.py
+├── rl/
+│   ├── training.py
+│   └── mappo.py
+├── cli/
+│   ├── train_mappo.py
+│   ├── eval_mappo.py
+│   └── batch_mappo.py
+├── README.md
+├── README_CN.md
+└── requirements.txt
+```
+
+Thin compatibility wrappers are still kept at the repository root, so existing
+imports like `from ccus_gym.env import CCUSEnv` and commands like
+`python train_mappo.py` continue to work.
 
 ## Agent Design
 

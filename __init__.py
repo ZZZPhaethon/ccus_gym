@@ -5,14 +5,14 @@ carbon capture, utilization, and storage under transport, supply, and
 storage disruptions.
 
 Architecture:
-    - Physical Layer (physical.py): Simulates CCUS network physics
-    - Decision Layer (env.py): PettingZoo ParallelEnv wrapping the physical layer
-    - Case Loader (case_loader.py): YAML case definition system
-    - Storage Proxy (storage_proxy.py): ML proxy model wrapper for storage sites
+    - core/: physics, network, quality, and proxy-model utilities
+    - sim/: environment, cases, scenarios, and disruption modelling
+    - rl/: training specs and the minimal MAPPO baseline
+    - cli/: command-line entry points for train/eval/batch experiments
 """
 
-from ccus_gym.env import CCUSEnv
-from ccus_gym.physical import (
+from ccus_gym.sim.env import CCUSEnv
+from ccus_gym.core.physical import (
     PhysicalLayer,
     PhysicalOutcome,
     EmitterPhysics,
@@ -24,17 +24,17 @@ from ccus_gym.physical import (
     SHIP_TYPES,
     RAIL_DEFAULTS,
 )
-from ccus_gym.network import CCUSNetwork, Emitter, TransportMode, StorageSite
-from ccus_gym.disruptions import DisruptionGenerator, MechanismAxes
-from ccus_gym.configs import (
+from ccus_gym.core.network import CCUSNetwork, Emitter, TransportMode, StorageSite
+from ccus_gym.sim.disruptions import DisruptionGenerator, MechanismAxes
+from ccus_gym.sim.configs import (
     MINIMAL_NETWORK_CONFIG,
     FULL_NETWORK_CONFIG,
     SCENARIO_CONFIGS,
     CALIBRATED_HUB_CONFIG,
     make_config,
 )
-from ccus_gym.case_loader import load_case
-from ccus_gym.quality import (
+from ccus_gym.sim.case_loader import load_case
+from ccus_gym.core.quality import (
     COMPONENT_KEYS,
     CAPTURE_METHOD_LIBRARY,
     DEFAULT_STORAGE_QUALITY_LIMITS,
@@ -42,14 +42,14 @@ from ccus_gym.quality import (
     compute_effective_stream,
     storage_quality_penalty,
 )
-from ccus_gym.storage_proxy import StorageProxyModel
-from ccus_gym.training import (
+from ccus_gym.core.storage_proxy import StorageProxyModel
+from ccus_gym.rl.training import (
     DEFAULT_MAPPO_CONFIG,
     build_role_groups,
     describe_training_setup,
     make_env_and_training_spec,
 )
-from ccus_gym.mappo import (
+from ccus_gym.rl.mappo import (
     RoleMAPPOPolicy,
     build_role_policies,
     evaluate_policies,
