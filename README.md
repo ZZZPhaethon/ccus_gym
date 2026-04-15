@@ -100,14 +100,11 @@ ccus_gym/
 │   ├── train_mappo.py
 │   ├── eval_mappo.py
 │   └── batch_mappo.py
+├── __init__.py
 ├── README.md
 ├── README_CN.md
 └── requirements.txt
 ```
-
-Thin compatibility wrappers are still kept at the repository root, so existing
-imports like `from ccus_gym.env import CCUSEnv` and commands like
-`python train_mappo.py` continue to work.
 
 ## Agent Design
 
@@ -251,10 +248,10 @@ env = CCUSEnv.from_case("path/to/your_case.yaml", seed=123)
 
 ## Quick Start: Minimal MAPPO Training
 
-Train a small run:
+Run training from the parent directory that contains the `ccus_gym/` package:
 
 ```bash
-python train_mappo.py \
+python -m ccus_gym.cli.train_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \
@@ -265,7 +262,7 @@ python train_mappo.py \
 Train with experiment outputs:
 
 ```bash
-python train_mappo.py \
+python -m ccus_gym.cli.train_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \
@@ -286,7 +283,7 @@ Supported best-checkpoint metrics:
 - `total_stored`
 - `total_vented`
 
-The default `score` is a composite metric defined in `mappo.py` that rewards
+The default `score` is a composite metric defined in `rl/mappo.py` that rewards
 stored CO2 and penalizes venting plus violations.
 
 ## Evaluation
@@ -294,7 +291,7 @@ stored CO2 and penalizes venting plus violations.
 Evaluate a saved checkpoint deterministically:
 
 ```bash
-python eval_mappo.py \
+python -m ccus_gym.cli.eval_mappo \
   --checkpoint runs/demo/best.pt \
   --base minimal \
   --scenario T \
@@ -325,7 +322,7 @@ Typical logged series include:
 Run multiple seeds and aggregate results:
 
 ```bash
-python batch_mappo.py \
+python -m ccus_gym.cli.batch_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \

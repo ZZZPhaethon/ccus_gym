@@ -98,13 +98,11 @@ ccus_gym/
 │   ├── train_mappo.py
 │   ├── eval_mappo.py
 │   └── batch_mappo.py
+├── __init__.py
 ├── README.md
 ├── README_CN.md
 └── requirements.txt
 ```
-
-为了兼容你原来的使用方式，仓库根目录仍然保留了很薄的一层 wrapper，所以像
-`from ccus_gym.env import CCUSEnv` 或 `python train_mappo.py` 这类旧用法依然能继续工作。
 
 ## 智能体设计
 
@@ -243,10 +241,10 @@ env = CCUSEnv.from_case("path/to/your_case.yaml", seed=123)
 
 ## 快速开始：最小 MAPPO 训练
 
-先跑一个最小训练示例：
+从包含 `ccus_gym/` 包目录的父目录执行训练命令：
 
 ```bash
-python train_mappo.py \
+python -m ccus_gym.cli.train_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \
@@ -257,7 +255,7 @@ python train_mappo.py \
 如果你希望同时产出实验日志、曲线和 checkpoint：
 
 ```bash
-python train_mappo.py \
+python -m ccus_gym.cli.train_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \
@@ -278,7 +276,7 @@ python train_mappo.py \
 - `total_stored`
 - `total_vented`
 
-默认的 `score` 是在 `mappo.py` 里定义的综合指标，大体上是：
+默认的 `score` 是在 `rl/mappo.py` 里定义的综合指标，大体上是：
 
 - 奖励更多封存
 - 惩罚更多排放
@@ -289,7 +287,7 @@ python train_mappo.py \
 可以对已保存的 checkpoint 做确定性评估：
 
 ```bash
-python eval_mappo.py \
+python -m ccus_gym.cli.eval_mappo \
   --checkpoint runs/demo/best.pt \
   --base minimal \
   --scenario T \
@@ -320,7 +318,7 @@ tensorboard --logdir runs/demo/tb
 可以直接运行多随机种子实验并自动汇总：
 
 ```bash
-python batch_mappo.py \
+python -m ccus_gym.cli.batch_mappo \
   --base minimal \
   --scenario T \
   --severity 0.3 \
