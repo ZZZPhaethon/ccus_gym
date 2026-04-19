@@ -151,6 +151,48 @@ class RoleTrainStats:
     entropy: float
 
 
+class ReturnNormalizer:
+    """Per-role running mean/variance normalizer for value function targets.
+
+    Critic is trained on normalized returns; raw values are recovered via
+    denormalize() so that GAE operates in the original reward scale.
+    Uses exponential moving average to track statistics online.
+    """
+
+    def __init__(self, momentum: float = 0.99, eps: float = 1e-8) -> None:
+        self.mean = 0.0
+        self.var = 1.0
+        self.momentum = momentum
+        self.eps = eps
+        self._initialized = False
+
+    def update(self, returns: np.ndarray) -> None:
+        batch_mean = float(np.mean(returns))
+        batch_var = float(np.var(returns))
+        if not self._initialized:
+            self.mean = batch_mean
+            self.var = max(batch_var, self.eps)
+            self._initialized = True
+        else:
+            m = self.momentum
+            self.mean = m * self.mean + (1.0 - m) * batch_mean
+            self.var = max(m * self.var + (1.0 - m) * batch_var, self.eps)
+
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean) / (self.var ** 0.5 + self.eps)
+
+    def denormalize(self, x: torch.Tensor) -> torch.Tensor:
+        return x * (self.var ** 0.5 + self.eps) + self.mean
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"mean": self.mean, "var": self.var, "initialized": self._initialized}
+
+    def load_state_dict(self, d: Dict[str, Any]) -> None:
+        self.mean = float(d["mean"])
+        self.var = float(d["var"])
+        self._initialized = bool(d["initialized"])
+
+
 class RoleMAPPOPolicy:
     def __init__(
         self,
@@ -170,6 +212,7 @@ class RoleMAPPOPolicy:
             params,
             lr=float(config.get("learning_rate", DEFAULT_MAPPO_CONFIG["learning_rate"])),
         )
+        self.value_normalizer = ReturnNormalizer()
 
     @torch.no_grad()
     def act(
@@ -192,6 +235,9 @@ class RoleMAPPOPolicy:
         action_t = action_t.clamp(1e-4, 1.0 - 1e-4)
         log_prob = dist.log_prob(action_t)
         value = self.critic(state_t)
+        # Denormalize so GAE is computed in the original reward scale
+        if self.value_normalizer._initialized:
+            value = self.value_normalizer.denormalize(value)
         return (
             action_t.squeeze(0).cpu().numpy(),
             float(log_prob.item()),
@@ -204,6 +250,11 @@ class RoleMAPPOPolicy:
         mini_batches = int(config.get("mini_batches", DEFAULT_MAPPO_CONFIG["mini_batches"]))
         entropy_coef = float(config.get("entropy_coef", DEFAULT_MAPPO_CONFIG["entropy_coef"]))
         value_coef = float(config.get("value_coef", DEFAULT_MAPPO_CONFIG["value_coef"]))
+
+        # Update running stats and pre-compute normalized returns for this batch
+        returns_np = batch.returns.cpu().numpy()
+        self.value_normalizer.update(returns_np)
+        returns_normalized = self.value_normalizer.normalize(batch.returns)
 
         n = batch.obs.shape[0]
         mb_size = max(1, n // max(1, mini_batches))
@@ -220,7 +271,7 @@ class RoleMAPPOPolicy:
                 state = batch.state[idx]
                 action = batch.action[idx].clamp(1e-4, 1.0 - 1e-4)
                 old_log_prob = batch.old_log_prob[idx]
-                returns = batch.returns[idx]
+                ret_norm = returns_normalized[idx]
                 advantages = batch.advantages[idx]
 
                 dist = self.actor.dist(obs)
@@ -234,7 +285,8 @@ class RoleMAPPOPolicy:
                     ratio, 1.0 - clip_ratio, 1.0 + clip_ratio
                 ) * advantages
                 policy_loss = -torch.min(surrogate_1, surrogate_2).mean()
-                value_loss = torch.mean((returns - value) ** 2)
+                # Value loss in normalized space — scale-invariant across roles
+                value_loss = torch.mean((ret_norm - value) ** 2)
                 loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
 
                 self.optimizer.zero_grad()
@@ -575,6 +627,7 @@ def save_checkpoint(
             "actor": policy.actor.state_dict(),
             "critic": policy.critic.state_dict(),
             "optimizer": policy.optimizer.state_dict(),
+            "value_normalizer": policy.value_normalizer.state_dict(),
         }
     torch.save(payload, path)
 
@@ -599,6 +652,8 @@ def load_checkpoint(
         policies[role].critic.load_state_dict(state["critic"])
         if load_optimizer and "optimizer" in state:
             policies[role].optimizer.load_state_dict(state["optimizer"])
+        if "value_normalizer" in state:
+            policies[role].value_normalizer.load_state_dict(state["value_normalizer"])
     return policies, payload.get("metadata", {})
 
 

@@ -1,86 +1,78 @@
-# CCUS-Gym: multi-agent reinforcement learning environment for CCUS
+# CCUS-Gym: Heterogeneous Multi-Agent Framework for CCUS Network Optimisation
 
-![Teaser image](assets/project_overview.png)
+CCUS-Gym is a PettingZoo-based research platform for coordinated CO2 capture,
+transport, and storage under operational disruptions, quality constraints, and
+economic trade-offs.
 
-CCUS-Gym is a PettingZoo-based multi-agent reinforcement learning environment for
-coordinated CO2 capture, transport, and storage under operational disruptions,
-quality constraints, and economic trade-offs.
+![Overview](assets/project_overview.png)
 
-The project now includes both:
+The project now contains three layers:
 
-- a research environment (`CCUSEnv`) with physics, disruptions, rewards, and
-  composition-aware CO2 quality modelling
-- a minimal end-to-end MAPPO baseline with training, evaluation, checkpointing,
-  TensorBoard logging, CSV/JSONL history export, curve plotting, and multi-seed
-  batch runs
+- **Research environment `CCUSEnv`**: physics simulation, disruption mechanisms,
+  reward functions, and composition-aware CO2 quality modelling
+- **MAPPO baseline**: minimal role-shared MAPPO for transport and storage agents
+- **Hybrid LLM+MAPPO framework**: an LLM (e.g. Qwen3) controls strategic emitter
+  decisions while MAPPO handles operational transport/storage decisions
 
-## What This Project Can Model
+## Core Design Rationale
 
-The current environment is designed for **fixed-network operational optimisation**
-rather than pipeline network design. A case defines:
+Agent roles differ fundamentally in decision character, motivating a
+**heterogeneous agent architecture**:
 
-- emitters
-- available transport modes
-- storage sites
-- fixed emitter-to-transport-to-storage route options
+| Role | Decision type | Controller |
+|------|--------------|------------|
+| `emitter` | Strategic: how much to capture, which route, purification level | **LLM** (Qwen3) |
+| `transport` | Operational: dispatch thresholds, destination preference | **MAPPO** |
+| `storage` | Operational: injection fraction, quality target | **MAPPO** |
 
-Each agent then learns how to operate within that fixed network.
+The LLM acts every 12 steps (once per simulated year) and caches its action in
+between, decoupling inference latency from the environment step frequency.
+MAPPO continues to update every step, preserving online learning.
 
-### Environment features
+## Preliminary Results
 
-- Multi-agent PettingZoo `ParallelEnv`
-- Three agent roles: `emitter`, `transport`, `storage`
-- Continuous action spaces
-- Centralized-training / decentralized-execution reward structure
-- Stochastic disruptions across transport, supply, and geological domains
-- Composition-aware CO2 stream quality
-- Capture-method-specific purity and impurity defaults
-- Storage acceptance constraints based on purity / impurity limits
-- Economic context including carbon tax, electricity price, capture subsidy,
-  storage credit, and off-spec penalties
-- Extreme economic scenario hooks such as electricity-price spikes and policy tightening
+Minimal network, scenario `T` (transport disruptions), seed 42, three-group comparison:
 
-### Training features
+| Metric | Pure MAPPO (50 ep) | Pure MAPPO (2000 ep) | **Hybrid Qwen3-8B (50 ep)** |
+|--------|-------------------|----------------------|------------------------------|
+| Mean score | -16.60 | -18.51 | **+11.62** |
+| Best score | -13.47 | -8.22 | **+14.06** |
+| Mean CO2 stored | 10.27 Mt | 8.88 Mt | **23.86 Mt (+132%)** |
+| Mean CO2 vented | 25.49 Mt | 27.01 Mt | **12.09 Mt (−53%)** |
+| Quality violations | 2.7 | 0.8 | **0.3** |
+| Pressure violations | 0 | 0 | **0** |
 
-- Minimal role-shared MAPPO baseline
-- One actor-critic pair per role
-- Beta-distribution policy for `[0, 1]` continuous actions
-- Centralized critic over a fixed-dimension global state vector
-- Deterministic checkpoint evaluation
-- Best-checkpoint selection by configurable metric
-- JSONL / CSV / TensorBoard / PNG logging
-- Multi-seed batch experiment runner
+Key finding: **the best score Pure MAPPO achieves after 2000 episodes (−8.22) remains
+well below the Hybrid mean after only 50 episodes (+11.62)**. The LLM's out-of-the-box
+domain knowledge — identifying disruptions, comparing transport costs, verifying purity
+thresholds — fully compensates for the reduced training budget.
 
 ## Architecture
 
-The environment keeps decision logic separate from physics:
-
 ```text
-Decision Layer (sim/env.py)
-    -> parses actions
+Decision Layer  (sim/env.py)
+    -> parses actions from both LLM and MAPPO agents
     -> builds observations
     -> computes rewards
 
-Physical Layer (core/physical.py)
+Physical Layer  (core/physical.py)
     -> settles nominations
     -> simulates pipeline / ship / rail movement
     -> applies storage pressure dynamics
     -> tracks quality penalties and overflow
+
+LLM Layer  (llm/)
+    -> converts physical state to natural-language description
+    -> calls LLM (local model or OpenAI-compatible API)
+    -> parses JSON output into continuous action vector
+    -> caches action for call_interval steps before refreshing
+
+Training Layer  (rl/)
+    -> hybrid_runner.py  — heterogeneous episode collection; only MAPPO roles updated
+    -> mappo.py          — role-shared MAPPO trainer, checkpoint, logging helpers
 ```
 
-The minimal training stack sits beside the environment:
-
-```text
-rl/mappo.py
-    -> role-shared MAPPO trainer
-    -> checkpoint save/load
-    -> deterministic evaluation
-    -> CSV / JSONL / TensorBoard / plot helpers
-```
-
-## Repository Guide
-
-The codebase is now grouped by function:
+## Repository Structure
 
 ```text
 ccus_gym/
@@ -95,144 +87,55 @@ ccus_gym/
 │   ├── disruptions.py
 │   ├── configs.py
 │   └── case_loader.py
+├── llm/                         ← LLM decision module (new)
+│   ├── __init__.py
+│   ├── emitter_policy.py        ← HTTP API mode (OpenAI-compatible)
+│   └── local_policy.py          ← Local model mode (HuggingFace transformers)
 ├── rl/
 │   ├── training.py
-│   └── mappo.py
+│   ├── mappo.py
+│   └── hybrid_runner.py         ← Hybrid training loop (new)
+├── baselines/
+│   └── rule_based.py
 ├── cli/
-│   ├── train_mappo.py
+│   ├── train_mappo.py           ← Pure MAPPO training
+│   ├── train_hybrid.py          ← LLM+MAPPO hybrid training (new)
 │   ├── eval_mappo.py
-│   └── batch_mappo.py
-├── __init__.py
-├── README.md
-├── README_CN.md
-└── requirements.txt
+│   ├── batch_mappo.py
+│   └── eval_rule_based.py
+├── viz/
+│   └── episode_animation.py
+scripts/
+├── download_qwen3.sh            ← Download Qwen3 weights (new)
+└── run_hybrid_slurm.sh          ← SLURM GPU job submission (new)
 ```
-
-## Agent Design
-
-Pipeline is passive infrastructure and is **not** an RL agent. The trainable
-roles are:
-
-| Role | Agents | Typical decisions |
-|------|--------|-------------------|
-| `emitter` | `emitter_0`, `emitter_1`, ... | route allocation, send fraction, capture fraction, purification effort |
-| `transport` | `transport_ship`, `transport_rail` | dispatch threshold, destination bias, quality threshold, optional price |
-| `storage` | `storage_0`, `storage_1`, ... | injection fraction, quality target bias |
-
-The environment uses heterogeneous observations and actions, but the MAPPO
-baseline shares parameters by role.
-
-## CO2 Quality and Capture Methods
-
-`quality.py` introduces lightweight but explicit quality modelling.
-
-Supported default capture-method families:
-
-- `post_combustion`
-- `pre_combustion`
-- `oxy_fuel`
-
-For each emitter, the config/case can specify:
-
-- `capture_method`
-- `base_purity`
-- `composition`
-- `capture_cost_per_t`
-- `capture_energy_mwh_per_t`
-- purification cost/energy multipliers
-
-At runtime the environment can:
-
-- raise purity through `purification_effort`
-- blend multiple incoming streams at storage
-- penalize or restrict flows that violate storage quality limits
-
-This makes the environment closer to a research testbed for
-**composition-aware CCUS coordination**, not just volume routing.
-
-## Disruptions
-
-Seven disruption families are supported:
-
-- `T`
-- `S`
-- `G`
-- `TS`
-- `TG`
-- `SG`
-- `TSG`
-
-They combine:
-
-- transport disruptions: pipeline failure, ship weather, rail conflict
-- supply disruptions: equipment failure, production swing, maintenance
-- geological disruptions: well failure, regulatory stop
-
-In addition to physical disruptions, configs can define `extreme_scenarios`
-that modify economic conditions such as electricity price and carbon tax over
-selected time windows.
-
-## Rewards
-
-Rewards follow a role-factored CTDE pattern:
-
-```text
-r_i = w_global * R_system + w_local * r_i_local
-```
-
-The current reward implementation includes:
-
-- shared terms for stored CO2, vented CO2, pressure violations, energy use,
-  and quality violations
-- emitter-local terms for sent volume, venting, buffer state, transport cost,
-  capture cost, capture energy, and purity incentive
-- transport-local terms for delivered volume, utilization, rejected volume,
-  revenue, and quality-sensitive behavior
-- storage-local terms for injected volume, pressure margin, quality penalties,
-  injection obligations, and overflow attribution
 
 ## Installation
 
-From this directory:
-
 ```bash
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-Main dependencies:
+Core dependencies: `numpy`, `gymnasium`, `pettingzoo`, `pyyaml`, `torch`,
+`matplotlib`, `tensorboard`
 
-- `numpy`
-- `gymnasium`
-- `pettingzoo`
-- `pyyaml`
-- `torch`
-- `matplotlib`
-- `tensorboard`
-- `scikit-learn` (optional but needed for proxy-model storage pressure)
+Additional dependencies for hybrid training:
+
+```bash
+pip install transformers>=4.51.0 accelerate>=1.0.0
+```
 
 ## Quick Start: Environment Only
-
-The import examples below assume you run Python from the **parent directory**
-that contains the `ccus_gym/` package folder.
 
 ```python
 from ccus_gym import CCUSEnv, make_config
 
-config = make_config(
-    base="minimal",
-    scenario_family="T",
-    severity=0.3,
-    seed=1,
-)
-
+config = make_config(base="minimal", scenario_family="T", severity=0.3, seed=1)
 env = CCUSEnv(config)
 obs, infos = env.reset()
 
 for _ in range(env.episode_length):
-    actions = {
-        agent: env.action_space(agent).sample()
-        for agent in env.agents
-    }
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
     obs, rewards, terminations, truncations, infos = env.step(actions)
     if all(terminations.values()):
         break
@@ -240,151 +143,150 @@ for _ in range(env.episode_length):
 print(env.get_episode_stats())
 ```
 
-You can also build from a YAML case:
-
-```python
-from ccus_gym import CCUSEnv
-
-env = CCUSEnv.from_case("path/to/your_case.yaml", seed=123)
-```
-
-## Quick Start: Minimal MAPPO Training
-
-Run training from the parent directory that contains the `ccus_gym/` package:
+## Quick Start: Pure MAPPO (Baseline)
 
 ```bash
 python -m ccus_gym.cli.train_mappo \
-  --base minimal \
-  --scenario T \
-  --severity 0.3 \
-  --episodes 10 \
-  --device cpu
+  --base minimal --scenario T --severity 0.3 \
+  --episodes 200 --device cpu \
+  --history-csv runs/mappo_T/history.csv \
+  --plot runs/mappo_T/curves.png \
+  --best-save runs/mappo_T/best.pt
 ```
 
-Train with experiment outputs:
+## Quick Start: Hybrid LLM+MAPPO Training
+
+### Step 1 — Download model weights (login node, once only)
 
 ```bash
-python -m ccus_gym.cli.train_mappo \
-  --base minimal \
-  --scenario T \
-  --severity 0.3 \
-  --episodes 20 \
-  --device cpu \
-  --history runs/demo/history.jsonl \
-  --history-csv runs/demo/history.csv \
-  --tensorboard-dir runs/demo/tb \
-  --plot runs/demo/training.png \
-  --best-save runs/demo/best.pt \
-  --latest-save runs/demo/latest.pt \
-  --best-metric score
+# Qwen3-8B (~16 GB), recommended for experiments
+HF_TOKEN=your_token bash scripts/download_qwen3.sh Qwen3-8B
+
+# Qwen3-1.7B (~3.8 GB), for quick tests
+HF_TOKEN=your_token bash scripts/download_qwen3.sh Qwen3-1.7B
 ```
 
-Supported best-checkpoint metrics:
+Get a free Read token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 
-- `score`
-- `total_stored`
-- `total_vented`
-
-The default `score` is a composite metric defined in `rl/mappo.py` that rewards
-stored CO2 and penalizes venting plus violations.
-
-## Evaluation
-
-Evaluate a saved checkpoint deterministically:
+### Step 2 — Submit SLURM job (GPU node)
 
 ```bash
-python -m ccus_gym.cli.eval_mappo \
-  --checkpoint runs/demo/best.pt \
-  --base minimal \
-  --scenario T \
-  --severity 0.3 \
-  --episodes 5 \
-  --device cpu \
-  --output runs/demo/eval.json
+sbatch scripts/run_hybrid_slurm.sh
+tail -f logs/hybrid_<jobid>.out
 ```
+
+### Step 3 — Or run directly (if GPU is already available)
+
+```bash
+python -m ccus_gym.cli.train_hybrid \
+  --llm-backend local \
+  --llm-model /path/to/models/Qwen3-8B \
+  --llm-call-interval 12 \
+  --base minimal --scenario T --severity 0.5 \
+  --episodes 50 --device cuda \
+  --history-csv runs/hybrid_T/history.csv \
+  --plot runs/hybrid_T/curves.png \
+  --llm-log runs/hybrid_T/llm_reasoning.json \
+  --best-save runs/hybrid_T/best.pt
+```
+
+Remote API (DashScope, vLLM, Ollama) is also supported:
+
+```bash
+python -m ccus_gym.cli.train_hybrid \
+  --llm-backend api \
+  --llm-base-url https://dashscope.aliyuncs.com/compatible-mode/v1 \
+  --llm-model qwen-plus --llm-api-key YOUR_KEY \
+  --base minimal --scenario TS --episodes 50
+```
+
+### LLM reasoning log
+
+`--llm-log` saves the full chain-of-thought for every LLM call, e.g.:
+
+```json
+{
+  "emitter_0": [
+    {
+      "timestep": 0,
+      "reasoning": "Pipeline available and cheaper ($8/t vs ship $18/t). Ship is disrupted. Buffer at 47% — send aggressively via pipeline.",
+      "action": [0.9, 0.1, 0.85, 0.8, 0.2]
+    }
+  ]
+}
+```
+
+This interpretability record is a key evidence source for domain-journal publications.
+
+## Recommended Experiment Design
+
+| Group | Entry point | Description |
+|-------|-------------|-------------|
+| Rule-based baseline | `eval_rule_based.py` | Economic heuristics, no learning |
+| Pure MAPPO | `train_mappo.py` | Full RL, standard baseline |
+| Hybrid LLM+MAPPO | `train_hybrid.py` | LLM emitter + MAPPO transport/storage |
+
+Run each group across scenarios T / TS / TSG with multiple seeds, then compare
+CO2 stored, operating cost, and quality violations.
+
+## Environment Features
+
+### Agents
+
+Pipeline is passive infrastructure and is **not** an RL agent.
+
+| Role | Typical decisions |
+|------|-------------------|
+| `emitter` | Route allocation, send fraction, capture fraction, purification effort |
+| `transport_ship` / `transport_rail` | Dispatch threshold, destination bias, quality threshold |
+| `storage_0`, `storage_1`, … | Injection fraction, quality target bias |
+
+### CO2 Quality Modelling
+
+Three capture-method families are supported: `post_combustion`, `pre_combustion`,
+`oxy_fuel` — each with default purity, impurity composition, and cost parameters.
+Purity can be raised at runtime through `purification_effort`. Storage sites
+enforce acceptance constraints based on purity and impurity thresholds.
+
+### Disruption System
+
+Seven scenario families (`T` / `S` / `G` / `TS` / `TG` / `SG` / `TSG`) drawn
+from three disruption domains:
+
+- **Transport (T)**: pipeline failure, ship weather, rail conflict
+- **Supply (S)**: equipment failure, production swing, planned maintenance
+- **Geological (G)**: well failure, regulatory injection halt
+
+### Rewards
+
+```text
+r_i = w_global × R_system + w_local × r_i_local
+```
+
+Shared terms: stored CO2, vented CO2, pressure violations, energy use, quality violations.
+Role-local terms: per-agent cost, utilisation, pressure margin, overflow attribution.
 
 ## TensorBoard
 
-If you trained with `--tensorboard-dir runs/demo/tb`, you can inspect logs with:
-
 ```bash
-tensorboard --logdir runs/demo/tb
+tensorboard --logdir runs/hybrid_T/tb
 ```
 
-Typical logged series include:
-
-- total stored / vented / captured
-- transport cost / capture cost / energy use
-- pressure and quality violations
-- composite training score
-- policy/value losses and entropy for each role
+Logged series: stored/vented/captured CO2, transport cost, quality violations,
+training score, and per-role policy loss / value loss / entropy.
 
 ## Multi-Seed Batch Experiments
 
-Run multiple seeds and aggregate results:
-
 ```bash
 python -m ccus_gym.cli.batch_mappo \
-  --base minimal \
-  --scenario T \
-  --severity 0.3 \
-  --episodes 20 \
-  --eval-episodes 5 \
-  --seeds 11,12,13 \
-  --device cpu \
-  --best-metric score \
-  --output-dir runs/batch_t03
-```
-
-This creates:
-
-- one subdirectory per seed
-- `history.jsonl`
-- `history.csv`
-- `training.png`
-- `tb/`
-- `best.pt`
-- `latest.pt`
-- `eval.json`
-- top-level `aggregate.csv`
-- top-level `summary.json`
-
-## Programmatic API
-
-Useful exports from `ccus_gym` include:
-
-- `CCUSEnv`
-- `make_config`
-- `load_case`
-- `DEFAULT_MAPPO_CONFIG`
-- `train_mappo`
-- `evaluate_policies`
-- `save_checkpoint`
-- `load_checkpoint`
-- `plot_training_history`
-- `write_tensorboard_history`
-- `build_role_groups`
-- `describe_training_setup`
-
-## Current Scope
-
-This repository now gives you a **research-capable prototype**, not a
-production-grade MARL stack. In particular:
-
-- the environment is much richer than the trainer
-- the MAPPO implementation is intentionally minimal
-- rollout collection is single-environment and synchronous
-- no distributed training or replay infrastructure is included
-
-That said, the project already supports a full reproducible loop:
-
-```text
-environment -> training -> logging -> best checkpoint -> evaluation -> multi-seed summary
+  --base minimal --scenario T --severity 0.5 \
+  --episodes 200 --seeds 11,12,13,14,15 \
+  --device cpu --output-dir runs/batch_mappo_T
 ```
 
 ## Notes
 
-- The optional storage proxy model is still supported through `storage_proxy.py`.
-- If you use proxy-based storage sites, `scikit-learn` must be installed.
-- The English README reflects the current implemented feature set more closely
-  than the older project summary.
+- The optional storage proxy model in `storage_proxy.py` requires `scikit-learn`.
+- The SLURM script targets the `tide` partition (H200 GPUs) with `--qos=long`.
+- Hybrid training output format is identical to pure MAPPO (same CSV columns,
+  same checkpoint format), enabling direct comparison.
