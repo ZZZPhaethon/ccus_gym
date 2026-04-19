@@ -6,3 +6,6 @@ scikit-learn
 torch
 matplotlib
 tensorboard
+# LLM hybrid runner
+transformers>=4.51.0
+accelerate>=1.0.0
