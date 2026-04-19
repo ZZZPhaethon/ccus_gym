@@ -4,6 +4,8 @@ CCUS-Gym is a PettingZoo-based research platform for coordinated CO2 capture,
 transport, and storage under operational disruptions, quality constraints, and
 economic trade-offs.
 
+![Overview](assets/project_overview.png)
+
 The project now contains three layers:
 
 - **Research environment `CCUSEnv`**: physics simulation, disruption mechanisms,
@@ -29,18 +31,21 @@ MAPPO continues to update every step, preserving online learning.
 
 ## Preliminary Results
 
-Minimal network, scenario `T` (transport disruptions), Qwen3-1.7B, first 10 episodes:
+Minimal network, scenario `T` (transport disruptions), seed 42, three-group comparison:
 
-| Metric | Pure MAPPO (ep 0–9) | Hybrid LLM+MAPPO (ep 0–9) |
-|--------|---------------------|---------------------------|
-| Mean score | -18.09 | **-2.77** |
-| CO2 stored | 11.16 Mt | **18.19 Mt (+63%)** |
-| CO2 vented | 24.61 Mt | **17.71 Mt (−28%)** |
-| Quality violations | 9.3 | **6.5** |
+| Metric | Pure MAPPO (50 ep) | Pure MAPPO (2000 ep) | **Hybrid Qwen3-8B (50 ep)** |
+|--------|-------------------|----------------------|------------------------------|
+| Mean score | -16.60 | -18.51 | **+11.62** |
+| Best score | -13.47 | -8.22 | **+14.06** |
+| Mean CO2 stored | 10.27 Mt | 8.88 Mt | **23.86 Mt (+132%)** |
+| Mean CO2 vented | 25.49 Mt | 27.01 Mt | **12.09 Mt (−53%)** |
+| Quality violations | 2.7 | 0.8 | **0.3** |
+| Pressure violations | 0 | 0 | **0** |
 
-The LLM's out-of-the-box domain knowledge — identifying disruptions, comparing
-transport costs, checking purity thresholds — delivers immediate benefit without
-any training.
+Key finding: **the best score Pure MAPPO achieves after 2000 episodes (−8.22) remains
+well below the Hybrid mean after only 50 episodes (+11.62)**. The LLM's out-of-the-box
+domain knowledge — identifying disruptions, comparing transport costs, verifying purity
+thresholds — fully compensates for the reduced training budget.
 
 ## Architecture
 
